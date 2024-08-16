@@ -33,25 +33,25 @@ def println(strr):
 
 
 class PreProcess:
-    def __init__(self, sr, exp_dir, per=3.7):
+    def __init__(self, sr, exp_dir, per=3.7):       # per параметр советую ставить на +-5 - это длина фрагментов нарезанного датасета. per=5 - каждый фрагмент будет максимум 5 сек
         self.slicer = Slicer(
             sr=sr,
-            threshold=-42,
-            min_length=1500,
-            min_interval=400,
+            threshold=-35,          # Порог для определения тишины. На -42 иногда думает что голос это тишина
+            min_length=1000,        # Минимальная длина фрагмента. !500 много, 700-1000 - збс
+            min_interval=200,       # Минимальный интервал между фрагментами. 400 так же много
             hop_size=15,
-            max_sil_kept=500,
+            max_sil_kept=100,       # Максимальная длина сохраняемой тишины. Оно нужно?
         )
         self.sr = sr
         self.bh, self.ah = signal.butter(N=5, Wn=48, btype="high", fs=self.sr)
         self.per = per
-        self.overlap = 0.3
+        self.overlap = 0.2          # Перекрытие между фрагментами. Уменьшим немного чтоб во 2 фрагменте небыло 1 фрагмента, а в 3 фрагменте 2 фрагмента)
         self.tail = self.per + self.overlap
-        self.max = 0.9
-        self.alpha = 0.75
+        self.max = 0.95             # Максимальное значение для нормализации. Повысим, чтоб погромче голос был
+        self.alpha = 0.65           # Процент смешивания нормализованного и ориг файла. Я бы его вообще полностью отключил, но на 65 тоже заебись) 
         self.exp_dir = exp_dir
         self.gt_wavs_dir = "%s/0_gt_wavs" % exp_dir
-        self.wavs16k_dir = "%s/1_16k_wavs" % exp_dir
+        self.wavs16k_dir = "%s/1_16k_wavs" % exp_dir        # Вообще лучше поэксперементировать, но я обычно эти значения ставлю
         os.makedirs(self.exp_dir, exist_ok=True)
         os.makedirs(self.gt_wavs_dir, exist_ok=True)
         os.makedirs(self.wavs16k_dir, exist_ok=True)

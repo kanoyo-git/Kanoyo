@@ -88,7 +88,7 @@ class EpochRecorder:
         elapsed_time = now_time - self.last_time
         self.last_time = now_time
         elapsed_time_str = str(datetime.timedelta(seconds=elapsed_time))
-        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")     # %Y-%m-%d (год, месяц, день) - нумаю не нужны
         return f"[{current_time}] | ({elapsed_time_str})"
 
 
@@ -502,11 +502,11 @@ def train_and_evaluate(
         if rank == 0:
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]["lr"]
-                logger.info(
-                    "Train Epoch: {} [{:.0f}%]".format(
-                        epoch, 100.0 * batch_idx / len(train_loader)
-                    )
-                )
+                #logger.info(
+                #    "Train Epoch: {} [{:.0f}%]".format(
+                #        epoch, 100.0 * batch_idx / len(train_loader)       Проценты на каждой эпохе думаю не нужны
+                #    )
+                #)
                 # Amor For Tensorboard display
                 if loss_mel > 75:
                     loss_mel = 75
@@ -515,7 +515,7 @@ def train_and_evaluate(
 
                 logger.info([global_step, lr])
                 logger.info(
-                    f"loss_disc={loss_disc:.3f}, loss_gen={loss_gen:.3f}, loss_fm={loss_fm:.3f},loss_mel={loss_mel:.3f}, loss_kl={loss_kl:.3f}"
+                    f"loss_disc={loss_disc:.3f}, loss_gen={loss_gen:.3f}, loss_fm={loss_fm:.3f}, loss_mel={loss_mel:.3f}, loss_kl={loss_kl:.3f}"
                 )
                 scalar_dict = {
                     "loss/g/total": loss_gen_all,
@@ -541,21 +541,21 @@ def train_and_evaluate(
                 scalar_dict.update(
                     {"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)}
                 )
-                image_dict = {
-                    "slice/mel_org": utils.plot_spectrogram_to_numpy(
-                        y_mel[0].data.cpu().numpy()
-                    ),
-                    "slice/mel_gen": utils.plot_spectrogram_to_numpy(
-                        y_hat_mel[0].data.cpu().numpy()
-                    ),
-                    "all/mel": utils.plot_spectrogram_to_numpy(
-                        mel[0].data.cpu().numpy()
-                    ),
-                }
+                #image_dict = {
+                #    "slice/mel_org": utils.plot_spectrogram_to_numpy(
+                #        y_mel[0].data.cpu().numpy()
+                #    ),
+                #    "slice/mel_gen": utils.plot_spectrogram_to_numpy(      Думаю ты спектрограммы не смотришь
+                #        y_hat_mel[0].data.cpu().numpy()
+                #    ),
+                #    "all/mel": utils.plot_spectrogram_to_numpy(
+                #        mel[0].data.cpu().numpy()
+                #    ),
+                #}
                 utils.summarize(
                     writer=writer,
                     global_step=global_step,
-                    images=image_dict,
+                    #images=image_dict,     Это к вернему тож относится
                     scalars=scalar_dict,
                 )
         global_step += 1
