@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 from i18n.i18n import I18nAuto
 from configs.config import Config
-from tabs.inference.infer import infer_tab
-from tabs.training.train import train_tab
+from tabs.inference.infer_tab import infer_tab
+from tabs.training.train_tab import train_tab
 
 tmp = os.path.join(now_dir, "TEMP")
 shutil.rmtree(tmp, ignore_errors=True)
