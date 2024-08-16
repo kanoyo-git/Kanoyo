@@ -1,56 +1,76 @@
-import platform
-import torch
-import io
+import gradio as gr
+import torch, platform
+import fairseq
+import os
 import logging
-import shutil
 import threading
-import traceback
-import warnings
-from random import shuffle
+import sys
 from subprocess import Popen
 from time import sleep
-import json
+from random import shuffle
 import pathlib
-import fairseq
+import json
+import traceback
 import faiss
-import gradio as gr
-import numpy as np
 from sklearn.cluster import MiniBatchKMeans
-from configs.config import Config
-from i18n.i18n import I18nAuto
-from infer.lib.train.process_ckpt import (
-    change_info,
-    extract_small_model,
-    merge,
-    show_info,
-)
-from infer.modules.uvr5.modules import uvr
-from infer.modules.vc.modules import VC
-import os
-import sys
+import numpy as np
 from dotenv import load_dotenv
-
-now_dir = os.getcwd()
-sys.path.append(now_dir)
-load_dotenv()
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-tmp = os.path.join(now_dir, "TEMP")
-shutil.rmtree(tmp, ignore_errors=True)
-shutil.rmtree("%s/runtime/Lib/site-packages/infer_pack" %
-              (now_dir), ignore_errors=True)
-shutil.rmtree("%s/runtime/Lib/site-packages/uvr5_pack" %
-              (now_dir), ignore_errors=True)
-os.makedirs(tmp, exist_ok=True)
-os.makedirs(os.path.join(now_dir, "logs"), exist_ok=True)
-os.makedirs(os.path.join(now_dir, "assets/weights"), exist_ok=True)
-os.environ["TEMP"] = tmp
-warnings.filterwarnings("ignore")
-torch.manual_seed(114514)
+now_dir = os.getcwd()
+sys.path.append(now_dir)
+load_dotenv()
+from infer.modules.vc.modules import VC
+from i18n.i18n import I18nAuto
+from configs.config import Config
+from infer.lib.train.process_ckpt import (
+    change_info,
+    extract_small_model,
+    merge,
+    show_info,
+)
+
+i18n = I18nAuto()
+ngpu = torch.cuda.device_count()
+gpu_infos = []
+mem = []
+if_gpu_ok = False
+
+outside_index_root = os.getenv("outside_index_root")
+
+def change_choices():
+    names = []
+    for name in os.listdir(weight_root):
+        if name.endswith(".pth"):
+            names.append(name)
+    index_paths = []
+    for root, dirs, files in os.walk(index_root, topdown=False):
+        for name in files:
+            if name.endswith(".index") and "trained" not in name:
+                index_paths.append("%s/%s" % (root, name))
+    return {"choices": sorted(names), "__type__": "update"}, {
+        "choices": sorted(index_paths),
+        "__type__": "update",
+    }
+
+def change_info_(ckpt_path):
+    if not os.path.exists(ckpt_path.replace(os.path.basename(ckpt_path), "train.log")):
+        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
+    try:
+        with open(
+            ckpt_path.replace(os.path.basename(ckpt_path), "train.log"), "r"
+        ) as f:
+            info = eval(f.read().strip("\n").split("\n")[0].split("\t")[-1])
+            sr, f0 = info["sample_rate"], info["if_f0"]
+            version = "v2" if ("version" in info and info["version"] == "v2") else "v1"
+            return sr, str(f0), version
+    except:
+        traceback.print_exc()
+        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
 
 config = Config()
 vc = VC(config)
@@ -63,12 +83,15 @@ if config.dml == True:
         return res
 
     fairseq.modules.grad_multiply.GradMultiply.forward = forward_dml
-i18n = I18nAuto()
-logger.info(i18n)
-ngpu = torch.cuda.device_count()
-gpu_infos = []
-mem = []
-if_gpu_ok = False
+
+def lookup_indices(index_root):
+    global index_paths
+    for root, dirs, files in os.walk(index_root, topdown=False):
+        for name in files:
+            if name.endswith(".index") and "trained" not in name:
+                index_paths.append("%s/%s" % (root, name))
+
+lookup_indices(outside_index_root)
 
 if torch.cuda.is_available() or ngpu != 0:
     for i in range(ngpu):
@@ -99,7 +122,7 @@ if torch.cuda.is_available() or ngpu != 0:
                 "6000",
             ]
         ):
-            if_gpu_ok = True 
+            if_gpu_ok = True  
             gpu_infos.append("%s\t%s" % (i, gpu_name))
             mem.append(
                 int(
@@ -114,44 +137,9 @@ if if_gpu_ok and len(gpu_infos) > 0:
     gpu_info = "\n".join(gpu_infos)
     default_batch_size = min(mem) // 2
 else:
-    gpu_info = i18n("Мне жаль, но у вас нет подходящей видеокарты для работы с Kanoyo")
+    gpu_info = i18n("很遗憾您这没有能用的显卡来支持您训练")
     default_batch_size = 1
 gpus = "-".join([i[0] for i in gpu_infos])
-
-class ToolButton(gr.Button, gr.components.FormComponent):
-    """Small button with single emoji as text, fits inside gradio forms"""
-
-    def __init__(self, **kwargs):
-        super().__init__(variant="tool", **kwargs)
-
-    def get_block_name(self):
-        return "button"
-
-
-weight_uvr5_root = os.getenv("weight_uvr5_root")
-outside_index_root = os.getenv("outside_index_root")
-index_root = os.getenv("index_root")
-
-
-def lookup_indices(index_root):
-    global index_paths
-    for root, dirs, files in os.walk(index_root, topdown=False):
-        for name in files:
-            if name.endswith(".index") and "trained" not in name:
-                index_paths.append("%s/%s" % (root, name))
-
-
-lookup_indices(index_root)
-lookup_indices(outside_index_root)
-uvr5_names = []
-for name in os.listdir(weight_uvr5_root):
-    if name.endswith(".pth") or "onnx" in name:
-        uvr5_names.append(name.replace(".pth", ""))
-
-def export_onnx(ModelPath, ExportedPath):
-    from infer.modules.onnx.export import export_onnx as eo
-
-    eo(ModelPath, ExportedPath)
 
 sr_dict = {
     "32k": 32000,
@@ -164,18 +152,6 @@ def if_done(done, p):
         if p.poll() is None:
             sleep(0.5)
         else:
-            break
-    done[0] = True
-
-def if_done_multi(done, ps):
-    while 1:
-        flag = 1
-        for p in ps:
-            if p.poll() is None:
-                flag = 0
-                sleep(0.5)
-                break
-        if flag == 1:
             break
     done[0] = True
 
@@ -215,6 +191,27 @@ def preprocess_dataset(trainset_dir, exp_dir, sr, n_p):
     logger.info(log)
     yield log
 
+F0GPUVisible = config.dml == False
+
+def change_f0_method(f0method8):
+    if f0method8 == "rmvpe_gpu":
+        visible = F0GPUVisible
+    else:
+        visible = False
+    return {"visible": visible, "__type__": "update"}
+
+def if_done_multi(done, ps):
+    while 1:
+        flag = 1
+        for p in ps:
+            if p.poll() is None:
+                flag = 0
+                sleep(0.5)
+                break
+        if flag == 1:
+            break
+    done[0] = True
+
 def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvpe):
     gpus = gpus.split("-")
     os.makedirs("%s/logs/%s" % (now_dir, exp_dir), exist_ok=True)
@@ -235,7 +232,7 @@ def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvp
             logger.info("Execute: " + cmd)
             p = Popen(
                 cmd, shell=True, cwd=now_dir
-            )  
+            ) 
             done = [False]
             threading.Thread(
                 target=if_done,
@@ -265,11 +262,11 @@ def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvp
                     logger.info("Execute: " + cmd)
                     p = Popen(
                         cmd, shell=True, cwd=now_dir
-                    ) 
+                    )  
                     ps.append(p)
                 done = [False]
                 threading.Thread(
-                    target=if_done_multi,  #
+                    target=if_done_multi,  
                     args=(
                         done,
                         ps,
@@ -350,7 +347,6 @@ def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvp
     logger.info(log)
     yield log
 
-
 def get_pretrained_models(path_str, f0_str, sr2):
     if_pretrained_generator_exist = os.access(
         "assets/pretrained%s/%sG%s.pth" % (path_str, f0_str, sr2), os.F_OK
@@ -385,11 +381,6 @@ def get_pretrained_models(path_str, f0_str, sr2):
         ),
     )
 
-def change_sr2(sr2, if_f0_3, version19):
-    path_str = "" if version19 == "v1" else "_v2"
-    f0_str = "f0" if if_f0_3 else ""
-    return get_pretrained_models(path_str, f0_str, sr2)
-
 def change_version19(sr2, if_f0_3, version19):
     path_str = "" if version19 == "v1" else "_v2"
     if sr2 == "32k" and version19 == "v1":
@@ -404,7 +395,6 @@ def change_version19(sr2, if_f0_3, version19):
         *get_pretrained_models(path_str, f0_str, sr2),
         to_return_sr2,
     )
-
 
 def change_f0(if_f0_3, sr2, version19):  
     path_str = "" if version19 == "v1" else "_v2"
@@ -558,7 +548,7 @@ def click_train(
     logger.info("Execute: " + cmd)
     p = Popen(cmd, shell=True, cwd=now_dir)
     p.wait()
-    return "После конца обучения вы можете посмотреть файл train.log в папке logs."
+    return "训练结束, 您可查看控制台训练日志或实验文件夹下的train.log"
 
 def train_index(exp_dir1, version19):
     exp_dir = "logs/%s" % (exp_dir1)
@@ -569,10 +559,10 @@ def train_index(exp_dir1, version19):
         else "%s/3_feature768" % (exp_dir)
     )
     if not os.path.exists(feature_dir):
-        return "Сначала извлеките характеристики!"
+        return "请先进行特征提取!"
     listdir_res = list(os.listdir(feature_dir))
     if len(listdir_res) == 0:
-        return "Сначала извлеките характеристики!"
+        return "请先进行特征提取！"
     infos = []
     npys = []
     for name in sorted(listdir_res):
@@ -583,8 +573,7 @@ def train_index(exp_dir1, version19):
     np.random.shuffle(big_npy_idx)
     big_npy = big_npy[big_npy_idx]
     if big_npy.shape[0] > 2e5:
-        infos.append("Попытка выполнить kmeans %s формы для 10k центров." %
-                     big_npy.shape[0])
+        infos.append("Trying doing kmeans %s shape to 10k centers." % big_npy.shape[0])
         yield "\n".join(infos)
         try:
             big_npy = (
@@ -608,10 +597,8 @@ def train_index(exp_dir1, version19):
     n_ivf = min(int(16 * np.sqrt(big_npy.shape[0])), big_npy.shape[0] // 39)
     infos.append("%s,%s" % (big_npy.shape, n_ivf))
     yield "\n".join(infos)
-    index = faiss.index_factory(
-        256 if version19 == "v1" else 768, "IVF%s,Flat" % n_ivf)
-    # index = faiss.index_factory(256if version19=="v1"else 768, "IVF%s,PQ128x4fs,RFlat"%n_ivf)
-    infos.append("Обучение")
+    index = faiss.index_factory(256 if version19 == "v1" else 768, "IVF%s,Flat" % n_ivf)
+    infos.append("training")
     yield "\n".join(infos)
     index_ivf = faiss.extract_index_ivf(index)  #
     index_ivf.nprobe = 1
@@ -621,11 +608,11 @@ def train_index(exp_dir1, version19):
         "%s/trained_IVF%s_Flat_nprobe_%s_%s_%s.index"
         % (exp_dir, n_ivf, index_ivf.nprobe, exp_dir1, version19),
     )
-    infos.append("Добавление")
+    infos.append("adding")
     yield "\n".join(infos)
     batch_size_add = 8192
     for i in range(0, big_npy.shape[0], batch_size_add):
-        index.add(big_npy[i: i + batch_size_add])
+        index.add(big_npy[i : i + batch_size_add])
     faiss.write_index(
         index,
         "%s/added_IVF%s_Flat_nprobe_%s_%s_%s.index"
@@ -682,11 +669,10 @@ def train1key(
         infos.append(strr)
         return "\n".join(infos)
 
-    yield get_info_str(i18n("Шаг 1: Обработка данных"))
-    [get_info_str(_) for _ in preprocess_dataset(
-        trainset_dir4, exp_dir1, sr2, np7)]
+    yield get_info_str(i18n("step1:正在处理数据"))
+    [get_info_str(_) for _ in preprocess_dataset(trainset_dir4, exp_dir1, sr2, np7)]
 
-    yield get_info_str(i18n("Шаг 2: Извлечение питча и характеристик"))
+    yield get_info_str(i18n("step2:正在提取音高&正在提取特征"))
     [
         get_info_str(_)
         for _ in extract_f0_feature(
@@ -694,7 +680,7 @@ def train1key(
         )
     ]
 
-    yield get_info_str(i18n("Шаг 3: Обучение модели"))
+    yield get_info_str(i18n("step3a:正在训练模型"))
     click_train(
         exp_dir1,
         sr2,
@@ -712,264 +698,247 @@ def train1key(
         version19,
     )
     yield get_info_str(
-        i18n("После конца обучения вы можете посмотреть файл train.log в папке logs.")
+        i18n("训练结束, 您可查看控制台训练日志或实验文件夹下的train.log")
     )
 
     [get_info_str(_) for _ in train_index(exp_dir1, version19)]
-    yield get_info_str(i18n("Процесс завершен! "))
+    yield get_info_str(i18n("全流程结束！"))
 
-def change_info_(ckpt_path):
-    if not os.path.exists(ckpt_path.replace(os.path.basename(ckpt_path), "train.log")):
-        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
-    try:
-        with open(
-            ckpt_path.replace(os.path.basename(ckpt_path), "train.log"), "r"
-        ) as f:
-            info = eval(f.read().strip("\n").split("\n")[0].split("\t")[-1])
-            sr, f0 = info["sample_rate"], info["if_f0"]
-            version = "v2" if (
-                "version" in info and info["version"] == "v2") else "v1"
-            return sr, str(f0), version
-    except:
-        traceback.print_exc()
-        return {"__type__": "update"}, {"__type__": "update"}, {"__type__": "update"}
+def change_sr2(sr2, if_f0_3, version19):
+    path_str = "" if version19 == "v1" else "_v2"
+    f0_str = "f0" if if_f0_3 else ""
+    return get_pretrained_models(path_str, f0_str, sr2)
 
-F0GPUVisible = config.dml == False
-
-def change_f0_method(f0method8):
-    if f0method8 == "rmvpe_gpu":
-        visible = F0GPUVisible
-    else:
-        visible = False
-    return {"visible": visible, "__type__": "update"}        
-        
-def train_tab():    
-        with gr.TabItem(i18n("Обучение")):
-            gr.Markdown(
-                value=i18n(
-                    "Шаг 1: Основные сведения о модели"
-                )
+def train_tab():
+    with gr.Column():
+        with gr.Row():
+            exp_dir1 = gr.Textbox(label=i18n("输入实验名"), value="mi-test")
+            sr2 = gr.Radio(
+                label=i18n("目标采样率"),
+                choices=["40k", "48k"],
+                value="40k",
+                interactive=True,
             )
-            with gr.Row():
-                exp_dir1 = gr.Textbox(label=i18n("Имя модели"), value="mi-test")
-                sr2 = gr.Radio(
-                    label=i18n("Частота дискретизации"),
-                    choices=["40k", "48k"],
-                    value="40k",
+            if_f0_3 = gr.Radio(
+                label=i18n("模型是否带音高指导(唱歌一定要, 语音可以不要)"),
+                choices=[True, False],
+                value=True,
+                interactive=True,
+            )
+            version19 = gr.Radio(
+                label=i18n("版本"),
+                choices=["v1", "v2"],
+                value="v2",
+                interactive=True,
+                visible=True,
+            )
+            np7 = gr.Slider(
+                minimum=0,
+                maximum=config.n_cpu,
+                step=1,
+                label=i18n("提取音高和处理数据使用的CPU进程数"),
+                value=int(np.ceil(config.n_cpu / 1.5)),
+                interactive=True,
+            )
+    with gr.Group():  
+        with gr.Row():
+            trainset_dir4 = gr.Textbox(
+                label=i18n("输入训练文件夹路径"),
+                value=i18n("E:\\语音音频+标注\\米津玄师\\src"),
+            )
+            spk_id5 = gr.Slider(
+                minimum=0,
+                maximum=4,
+                step=1,
+                label=i18n("请指定说话人id"),
+                value=0,
+                interactive=True,
+            )
+            but1 = gr.Button(i18n("处理数据"), variant="primary")
+            info1 = gr.Textbox(label=i18n("输出信息"), value="")
+            but1.click(
+                preprocess_dataset,
+                [trainset_dir4, exp_dir1, sr2, np7],
+                [info1],
+                api_name="train_preprocess",
+            )
+    with gr.Group():
+        with gr.Row():
+            with gr.Column():
+                gpus6 = gr.Textbox(
+                    label=i18n(
+                        "以-分隔输入使用的卡号, 例如   0-1-2   使用卡0和卡1和卡2"
+                    ),
+                    value=gpus,
+                    interactive=True,
+                    visible=F0GPUVisible,
+                )
+                gpu_info9 = gr.Textbox(
+                    label=i18n("显卡信息"), value=gpu_info, visible=F0GPUVisible
+                )
+            with gr.Column():
+                f0method8 = gr.Radio(
+                    label=i18n(
+                        "选择音高提取算法:输入歌声可用pm提速,高质量语音但CPU差可用dio提速,harvest质量更好但慢,rmvpe效果最好且微吃CPU/GPU"
+                    ),
+                    choices=["pm", "harvest", "dio", "rmvpe", "rmvpe_gpu"],
+                    value="rmvpe_gpu",
                     interactive=True,
                 )
-                if_f0_3 = gr.Radio(
-                    label=i18n("Имеет ли модель руководство по работе с питчем?"),
-                    choices=[True, False],
-                    value=True,
+                gpus_rmvpe = gr.Textbox(
+                    label=i18n(
+                        "rmvpe卡号配置：以-分隔输入使用的不同进程卡号,例如0-0-1使用在卡0上跑2个进程并在卡1上跑1个进程"
+                    ),
+                    value="%s-%s" % (gpus, gpus),
                     interactive=True,
+                    visible=F0GPUVisible,
                 )
-                version19 = gr.Radio(
-                    label=i18n("Версия RVC"),
-                    choices=["v1", "v2"],
-                    value="v2",
-                    interactive=True,
-                    visible=True,
-                )
-                np7 = gr.Slider(
-                    minimum=0,
-                    maximum=config.n_cpu,
-                    step=1,
-                    label=i18n("Количество используемых потоков CPU"),
-                    value=int(np.ceil(config.n_cpu / 1.5)),
-                    interactive=True,
-                )
-            with gr.Group():  
-                gr.Markdown(
-                    value=i18n(
-                        "Шаг 2: Датасет и обработка данных"
-                    )
-                )
-                with gr.Row():
-                    trainset_dir4 = gr.Textbox(
-                        label=i18n("Путь к папке с датасетом"),
-                        value=i18n("E:\\test\\test\\src"),
-                    )
-                    spk_id5 = gr.Slider(
-                        minimum=0,
-                        maximum=4,
-                        step=1,
-                        label=i18n("ID голоса"),
-                        value=0,
-                        interactive=True,
-                    )
-                    but1 = gr.Button(i18n("Обработка данных"), variant="primary")
-                    info1 = gr.Textbox(label=i18n("Консоль"), value="")
-                    but1.click(
-                        preprocess_dataset,
-                        [trainset_dir4, exp_dir1, sr2, np7],
-                        [info1],
-                        api_name="train_preprocess",
-                    )
-            with gr.Group():
-                gr.Markdown(
-                    value=i18n(
-                        "Шаг 2.1: Извлечение характеристик и метод извлечения тона"
-                    )
-                )
-                with gr.Row():
-                    with gr.Column():
-                        gpus6 = gr.Textbox(
-                            label=i18n(
-                                "Номер используемых GPU, например укажите 0-1-2 чтобы использовать 3 видеокарты"
-                            ),
-                            value=gpus,
-                            interactive=True,
-                            visible=F0GPUVisible,
-                        )
-                        gpu_info9 = gr.Textbox(
-                            label=i18n("Информация о GPU"), value=gpu_info, visible=F0GPUVisible
-                        )
-                    with gr.Column():
-                        f0method8 = gr.Radio(
-                            label=i18n(
-                                "Выберите алгоритм извлечения тона. Быстрые но плохие по качеству - pm и dio, Неплохой - harvest, а лучший - rmvpe"
-                            ),
-                            choices=["pm", "harvest", "dio",
-                                     "rmvpe", "rmvpe_gpu"],
-                            value="rmvpe_gpu",
-                            interactive=True,
-                        )
-                        gpus_rmvpe = gr.Textbox(
-                            label=i18n(
-                                "Номер используемых GPU для извлечения характеристик используя rmvpe"
-                            ),
-                            value="%s-%s" % (gpus, gpus),
-                            interactive=True,
-                            visible=F0GPUVisible,
-                        )
-                    but2 = gr.Button(i18n("Извлечение характеристик"), variant="primary")
-                    info2 = gr.Textbox(label=i18n("Консоль"),
-                                       value="", max_lines=8)
-                    f0method8.change(
-                        fn=change_f0_method,
-                        inputs=[f0method8],
-                        outputs=[gpus_rmvpe],
-                    )
-                    but2.click(
-                        extract_f0_feature,
-                        [
-                            gpus6,
-                            np7,
-                            f0method8,
-                            if_f0_3,
-                            exp_dir1,
-                            version19,
-                            gpus_rmvpe,
-                        ],
-                        [info2],
-                        api_name="train_extract_f0_feature",
-                    )
-            with gr.Group():
-                gr.Markdown(value=i18n("Шаг 3: Информация и обучение"))
-                with gr.Row():
-                    save_epoch10 = gr.Slider(
-                        minimum=1,
-                        maximum=50,
-                        step=1,
-                        label=i18n("Сохранять модель каждые X эпох"),
-                        value=5,
-                        interactive=True,
-                    )
-                    total_epoch11 = gr.Slider(
-                        minimum=2,
-                        maximum=1000,
-                        step=1,
-                        label=i18n("Всего эпох"),
-                        value=20,
-                        interactive=True,
-                    )
-                    batch_size12 = gr.Slider(
-                        minimum=1,
-                        maximum=40,
-                        step=1,
-                        label=i18n("Батч-сайз"),
-                        value=default_batch_size,
-                        interactive=True,
-                    )
-                    if_save_latest13 = gr.Radio(
-                        label=i18n("Сохранять только последний ckpt для экономии памяти?"),
-                        choices=[i18n("Да"), i18n("Нет")],
-                        value=i18n("Да"),
-                        interactive=True,
-                    )
-                    if_cache_gpu17 = gr.Radio(
-                        label=i18n(
-                            "Кешировать ли датасет в память GPU? (Только если датасет менее 10 минут)"
-                        ),
-                        choices=[i18n("Да"), i18n("Нет")],
-                        value=i18n("Нет"),
-                        interactive=True,
-                    )
-                    if_save_every_weights18 = gr.Radio(
-                        label=i18n(
-                            "Сохранять ли модели на диске в каждые X эпох?"
-                        ),
-                        choices=[i18n("Да"), i18n("Нет")],
-                        value=i18n("Да"),
-                        interactive=True,
-                    )
-                with gr.Row():
-                    pretrained_G14 = gr.Textbox(
-                        label=i18n("Претрейн G"),
-                        value="assets/pretrained_v2/f0G40k.pth",
-                        interactive=True,
-                    )
-                    pretrained_D15 = gr.Textbox(
-                        label=i18n("Претрейн D"),
-                        value="assets/pretrained_v2/f0D40k.pth",
-                        interactive=True,
-                    )
-                    sr2.change(
-                        change_sr2,
-                        [sr2, if_f0_3, version19],
-                        [pretrained_G14, pretrained_D15],
-                    )
-                    version19.change(
-                        change_version19,
-                        [sr2, if_f0_3, version19],
-                        [pretrained_G14, pretrained_D15, sr2],
-                    )
-                    if_f0_3.change(
-                        change_f0,
-                        [if_f0_3, sr2, version19],
-                        [f0method8, gpus_rmvpe, pretrained_G14, pretrained_D15],
-                    )
-                    gpus16 = gr.Textbox(
-                        label=i18n(
-                            "Номер используемых GPU, например укажите 0-1-2 чтобы использовать 3 видеокарты"
-                        ),
-                        value=gpus,
-                        interactive=True,
-                    )
-                    but3 = gr.Button(i18n("Обучить модель"), variant="primary")
-                    but4 = gr.Button(i18n("Обучить индекс"), variant="primary")
-                    info3 = gr.Textbox(label=i18n("Консоль"),
-                                       value="", max_lines=10)
-                    but3.click(
-                        click_train,
-                        [
-                            exp_dir1,
-                            sr2,
-                            if_f0_3,
-                            spk_id5,
-                            save_epoch10,
-                            total_epoch11,
-                            batch_size12,
-                            if_save_latest13,
-                            pretrained_G14,
-                            pretrained_D15,
-                            gpus16,
-                            if_cache_gpu17,
-                            if_save_every_weights18,
-                            version19,
-                        ],
-                        info3,
-                        api_name="train_start",
-                    )
-                    but4.click(train_index, [exp_dir1, version19], info3)
+            but2 = gr.Button(i18n("特征提取"), variant="primary")
+            info2 = gr.Textbox(label=i18n("输出信息"), value="", max_lines=8)
+            f0method8.change(
+                fn=change_f0_method,
+                inputs=[f0method8],
+                outputs=[gpus_rmvpe],
+            )
+            but2.click(
+                extract_f0_feature,
+                [
+                    gpus6,
+                    np7,
+                    f0method8,
+                    if_f0_3,
+                    exp_dir1,
+                    version19,
+                    gpus_rmvpe,
+                ],
+                [info2],
+                api_name="train_extract_f0_feature",
+            )
+    with gr.Group():
+        with gr.Row():
+            save_epoch10 = gr.Slider(
+                minimum=1,
+                maximum=50,
+                step=1,
+                label=i18n("保存频率save_every_epoch"),
+                value=5,
+                interactive=True,
+            )
+            total_epoch11 = gr.Slider(
+                minimum=2,
+                maximum=1000,
+                step=1,
+                label=i18n("总训练轮数total_epoch"),
+                value=20,
+                interactive=True,
+            )
+            batch_size12 = gr.Slider(
+                minimum=1,
+                maximum=40,
+                step=1,
+                label=i18n("每张显卡的batch_size"),
+                value=default_batch_size,
+                interactive=True,
+            )
+            if_save_latest13 = gr.Radio(
+                label=i18n("是否仅保存最新的ckpt文件以节省硬盘空间"),
+                choices=[i18n("是"), i18n("否")],
+                value=i18n("否"),
+                interactive=True,
+            )
+            if_cache_gpu17 = gr.Radio(
+                label=i18n(
+                    "是否缓存所有训练集至显存. 10min以下小数据可缓存以加速训练, 大数据缓存会炸显存也加不了多少速"
+                ),
+                choices=[i18n("是"), i18n("否")],
+                value=i18n("否"),
+                interactive=True,
+            )
+            if_save_every_weights18 = gr.Radio(
+                label=i18n("是否在每次保存时间点将最终小模型保存至weights文件夹"),
+                choices=[i18n("是"), i18n("否")],
+                value=i18n("否"),
+                interactive=True,
+            )
+        with gr.Row():
+            pretrained_G14 = gr.Textbox(
+                label=i18n("加载预训练底模G路径"),
+                value="assets/pretrained_v2/f0G40k.pth",
+                interactive=True,
+            )
+            pretrained_D15 = gr.Textbox(
+                label=i18n("加载预训练底模D路径"),
+                value="assets/pretrained_v2/f0D40k.pth",
+                interactive=True,
+            )
+            sr2.change(
+                change_sr2,
+                [sr2, if_f0_3, version19],
+                [pretrained_G14, pretrained_D15],
+            )
+            version19.change(
+                change_version19,
+                [sr2, if_f0_3, version19],
+                [pretrained_G14, pretrained_D15, sr2],
+            )
+            if_f0_3.change(
+                change_f0,
+                [if_f0_3, sr2, version19],
+                [f0method8, gpus_rmvpe, pretrained_G14, pretrained_D15],
+            )
+            gpus16 = gr.Textbox(
+                label=i18n("以-分隔输入使用的卡号, 例如   0-1-2   使用卡0和卡1和卡2"),
+                value=gpus,
+                interactive=True,
+            )
+            but3 = gr.Button(i18n("训练模型"), variant="primary")
+            but4 = gr.Button(i18n("训练特征索引"), variant="primary")
+            but5 = gr.Button(i18n("一键训练"), variant="primary")
+            info3 = gr.Textbox(label=i18n("输出信息"), value="", max_lines=10)
+            but3.click(
+                click_train,
+                [
+                    exp_dir1,
+                    sr2,
+                    if_f0_3,
+                    spk_id5,
+                    save_epoch10,
+                    total_epoch11,
+                    batch_size12,
+                    if_save_latest13,
+                    pretrained_G14,
+                    pretrained_D15,
+                    gpus16,
+                    if_cache_gpu17,
+                    if_save_every_weights18,
+                    version19,
+                ],
+                info3,
+                api_name="train_start",
+            )
+            but4.click(train_index, [exp_dir1, version19], info3)
+            but5.click(
+                train1key,
+                [
+                    exp_dir1,
+                    sr2,
+                    if_f0_3,
+                    trainset_dir4,
+                    spk_id5,
+                    np7,
+                    f0method8,
+                    save_epoch10,
+                    total_epoch11,
+                    batch_size12,
+                    if_save_latest13,
+                    pretrained_G14,
+                    pretrained_D15,
+                    gpus16,
+                    if_cache_gpu17,
+                    if_save_every_weights18,
+                    version19,
+                    gpus_rmvpe,
+                ],
+                info3,
+                api_name="train_start_all",
+            )
