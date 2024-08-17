@@ -28,7 +28,7 @@ onnxruntime-gpu; sys_platform != 'darwin'
 
 # Веб
 gradio==4.29.0
-fastapi==0.88
+fastapi
 uvicorn>=0.21.1
 httpx
 
