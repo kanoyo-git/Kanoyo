@@ -22,7 +22,6 @@ def infer_tab():
                         label=i18n("Аудио файл"),
                         type="filepath",
                     )
-                    
                 with gr.Accordion("Дополнительные настройки", open=False):
                     with gr.Row():
                         with gr.Column(scale=2):
@@ -72,29 +71,21 @@ def infer_tab():
                             )
                             
             with gr.Column(scale=1):
+                refresh_button = gr.Button(
+                    i18n("Обновить"), variant="primary"
+                )
+                clean_button = gr.Button(
+                    i18n("Очистить"), variant="primary"
+                )
                 sid0 = gr.Dropdown(
                     label=i18n("Модель голоса"),
                     choices=sorted(names),
                     interactive=True,
                 )
-                file_index2 = gr.Dropdown(
+                file_index1 = gr.Dropdown(
                     label=i18n("Путь к индексу (авто)"),
                     choices=sorted(index_paths),
                     interactive=True,
-                )
-                spk_item = gr.Slider(
-                    minimum=0,
-                    maximum=2333,
-                    step=1,
-                    label=i18n("ID говорящего"),
-                    value=0,
-                    interactive=True,
-                )
-                refresh_button = gr.Button(
-                    i18n("Обновить"), variant="primary"
-                )
-                clean_button = gr.Button(
-                    i18n("Очистить"), variant="secondary"
                 )
                 f0method0 = gr.Radio(
                     label=i18n("Метод извлечения F0"),
@@ -106,19 +97,26 @@ def infer_tab():
                     value="rmvpe",
                     interactive=True,
                 )
+                spk_item = gr.Slider(
+                    minimum=0,
+                    maximum=2333,
+                    step=1,
+                    label=i18n("ID говорящего"),
+                    value=0,
+                    interactive=True,
+                    visible=False,
+                )
+                but0 = gr.Button(i18n("Конвертировать"), variant="primary", scale=1)
             
         with gr.Row():
             vc_output1 = gr.Textbox(label=i18n("Консоль"), interactive=False)
             vc_output2 = gr.Audio(
                 label=i18n("Аудио")
             )
-        with gr.Row():
-            but0 = gr.Button(i18n("Конвертировать"), variant="primary", scale=1)
-            
         refresh_button.click(
             fn=change_choices,
             inputs=[],
-            outputs=[sid0, file_index2],
+            outputs=[sid0, file_index1],
             api_name="infer_refresh",
         )
         clean_button.click(
@@ -135,7 +133,8 @@ def infer_tab():
                 vc_transform0,
                 f0_file,
                 f0method0,
-                file_index2,
+                file_index1,
+                file_index1,
                 index_rate1,
                 filter_radius0,
                 resample_sr0,
@@ -144,6 +143,12 @@ def infer_tab():
             ],
             [vc_output1, vc_output2],
             api_name="infer_convert",
+        )
+        sid0.change(
+            fn=vc.get_vc,
+            inputs=[sid0, protect0, file_index1],
+            outputs=[protect0, file_index1],
+            api_name="infer_change_voice",
         )
 
 infer_tab()

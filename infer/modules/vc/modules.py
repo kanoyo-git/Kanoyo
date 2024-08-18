@@ -36,33 +36,27 @@ class VC:
     def get_vc(self, sid, *to_return_protect):
         logger.info("Get sid: " + sid)
 
+        protect_value0 = to_return_protect[0] if len(to_return_protect) > 0 and self.if_f0 != 0 else 0.5
+        protect_value1 = to_return_protect[1] if len(to_return_protect) > 1 and self.if_f0 != 0 else 0.33
+
         to_return_protect0 = {
             "visible": self.if_f0 != 0,
-            "value": (
-                to_return_protect[0] if self.if_f0 != 0 and to_return_protect else 0.5
-            ),
+            "value": protect_value0,
             "__type__": "update",
         }
         to_return_protect1 = {
             "visible": self.if_f0 != 0,
-            "value": (
-                to_return_protect[1] if self.if_f0 != 0 and to_return_protect else 0.33
-            ),
+            "value": protect_value1,
             "__type__": "update",
         }
 
         if sid == "" or sid == []:
-            if (
-                self.hubert_model is not None
-            ):  # 考虑到轮询, 需要加个判断看是否 sid 是由有模型切换到无模型的
+            if self.hubert_model is not None:
                 logger.info("Clean model cache")
-                del (self.net_g, self.n_spk, self.hubert_model, self.tgt_sr)  # ,cpt
-                self.hubert_model = self.net_g = self.n_spk = self.hubert_model = (
-                    self.tgt_sr
-                ) = None
+                del (self.net_g, self.n_spk, self.hubert_model, self.tgt_sr)
+                self.hubert_model = self.net_g = self.n_spk = self.hubert_model = self.tgt_sr = None
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                ###楼下不这么折腾清理不干净
                 self.if_f0 = self.cpt.get("f0", 1)
                 self.version = self.cpt.get("version", "v1")
                 if self.version == "v1":
@@ -97,6 +91,7 @@ class VC:
                 "",
                 "",
             )
+
         person = f'{os.getenv("weight_root")}/{sid}'
         logger.info(f"Loading: {person}")
 
@@ -143,6 +138,7 @@ class VC:
             else {"visible": True, "maximum": n_spk, "__type__": "update"}
         )
 
+
     def vc_single(
         self,
         sid,
@@ -151,7 +147,7 @@ class VC:
         f0_file,
         f0_method,
         file_index,
-        file_index2,
+        file_index1,
         index_rate,
         filter_radius,
         resample_sr,
@@ -180,8 +176,8 @@ class VC:
                     .strip(" ")
                     .replace("trained", "added")
                 )
-            elif file_index2:
-                file_index = file_index2
+            elif file_index1:
+                file_index = file_index1
             else:
                 file_index = ""  # 防止小白写错，自动帮他替换掉
 
@@ -233,7 +229,6 @@ class VC:
         f0_up_key,
         f0_method,
         file_index,
-        file_index2,
         index_rate,
         filter_radius,
         resample_sr,
@@ -266,7 +261,6 @@ class VC:
                     None,
                     f0_method,
                     file_index,
-                    file_index2,
                     # file_big_npy,
                     index_rate,
                     filter_radius,
