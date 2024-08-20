@@ -3,10 +3,10 @@ import glob
 import json
 import logging
 import os
-import subprocess
 import sys
-import shutil
+from copy import deepcopy
 
+import codecs
 import numpy as np
 import torch
 from scipy.io.wavfile import read
@@ -16,7 +16,7 @@ MATPLOTLIB_FLAG = False
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging
 
-
+"""
 def load_checkpoint_d(checkpoint_path, combd, sbd, optimizer=None, load_opt=1):
     assert os.path.isfile(checkpoint_path)
     checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
@@ -66,37 +66,9 @@ def load_checkpoint_d(checkpoint_path, combd, sbd, optimizer=None, load_opt=1):
     #     traceback.print_exc()
     logger.info("Loaded checkpoint '{}' (epoch {})".format(checkpoint_path, iteration))
     return model, optimizer, learning_rate, iteration
+"""
 
 
-# def load_checkpoint(checkpoint_path, model, optimizer=None):
-#   assert os.path.isfile(checkpoint_path)
-#   checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
-#   iteration = checkpoint_dict['iteration']
-#   learning_rate = checkpoint_dict['learning_rate']
-#   if optimizer is not None:
-#     optimizer.load_state_dict(checkpoint_dict['optimizer'])
-#   # print(1111)
-#   saved_state_dict = checkpoint_dict['model']
-#   # print(1111)
-#
-#   if hasattr(model, 'module'):
-#     state_dict = model.module.state_dict()
-#   else:
-#     state_dict = model.state_dict()
-#   new_state_dict= {}
-#   for k, v in state_dict.items():
-#     try:
-#       new_state_dict[k] = saved_state_dict[k]
-#     except:
-#       logger.info("%s is not in the checkpoint" % k)
-#       new_state_dict[k] = v
-#   if hasattr(model, 'module'):
-#     model.module.load_state_dict(new_state_dict)
-#   else:
-#     model.load_state_dict(new_state_dict)
-#   logger.info("Loaded checkpoint '{}' (epoch {})" .format(
-#     checkpoint_path, iteration))
-#   return model, optimizer, learning_rate, iteration
 def load_checkpoint(checkpoint_path, model, optimizer=None, load_opt=1):
     assert os.path.isfile(checkpoint_path)
     checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
@@ -162,6 +134,7 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path)
     )
 
 
+"""
 def save_checkpoint_d(combd, sbd, optimizer, learning_rate, iteration, checkpoint_path):
     logger.info(
         "Saving model and optimizer state at epoch {} to {}".format(
@@ -186,6 +159,7 @@ def save_checkpoint_d(combd, sbd, optimizer, learning_rate, iteration, checkpoin
         },
         checkpoint_path,
     )
+"""
 
 
 def summarize(
@@ -279,13 +253,14 @@ def load_wav_to_torch(full_path):
 
 def load_filepaths_and_text(filename, split="|"):
     try:
-        with open(filename, encoding="utf-8") as f:
-            filepaths_and_text = [line.strip().split(split) for line in f]
-    except UnicodeDecodeError:
-        with open(filename) as f:
-            filepaths_and_text = [line.strip().split(split) for line in f]
-    
-    return filepaths_and_text
+        return [
+            line.strip().split(split)
+            for line in codecs.open(filename, encoding="utf-8")
+        ]
+    except UnicodeDecodeError as e:
+        logger.error("Error loading file %s: %s", filename, e)
+
+    return []
 
 
 def get_hparams(init=True):
@@ -363,6 +338,7 @@ def get_hparams(init=True):
         required=True,
         help="if caching the dataset in GPU memory, 1 or 0",
     )
+    parser.add_argument("-a", "--author", type=str, default="", help="Model author")
 
     args = parser.parse_args()
     name = args.experiment_dir
@@ -388,9 +364,11 @@ def get_hparams(init=True):
     hparams.save_every_weights = args.save_every_weights
     hparams.if_cache_data_in_gpu = args.if_cache_data_in_gpu
     hparams.data.training_files = "%s/filelist.txt" % experiment_dir
+    hparams.author = args.author
     return hparams
 
 
+"""
 def get_hparams_from_dir(model_dir):
     config_save_path = os.path.join(model_dir, "config.json")
     with open(config_save_path, "r") as f:
@@ -434,6 +412,7 @@ def check_git_hash(model_dir):
             )
     else:
         open(path, "w").write(cur_hash)
+"""
 
 
 def get_logger(model_dir, filename="train.log"):
@@ -466,6 +445,9 @@ class HParams:
 
     def values(self):
         return self.__dict__.values()
+
+    def copy(self):
+        return deepcopy(self)
 
     def __len__(self):
         return len(self.__dict__)

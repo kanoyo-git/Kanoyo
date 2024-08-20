@@ -6,15 +6,12 @@ EXPOSE 7865
 
 WORKDIR /app
 
-COPY . .
-
 # Install dependenceis to add PPAs
 RUN apt-get update && \
-    apt-get install -y -qq ffmpeg aria2 && apt clean && \
+    apt-get install -y -qq aria2 && apt clean && \
     apt-get install -y software-properties-common && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
 # Add the deadsnakes PPA to get Python 3.9
 RUN add-apt-repository ppa:deadsnakes/ppa
 
@@ -28,7 +25,9 @@ RUN apt-get update && \
 # Set Python 3.9 as the default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1
 
-RUN python3 -m pip install --no-cache-dir -r requirements.txt
+COPY . .
+
+RUN python3 -m pip install --no-cache-dir -r requirements/main.txt
 
 RUN aria2c --console-log-level=error -c -x 16 -s 16 -k 1M https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/pretrained_v2/D40k.pth -d assets/pretrained_v2/ -o D40k.pth
 RUN aria2c --console-log-level=error -c -x 16 -s 16 -k 1M https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/pretrained_v2/G40k.pth -d assets/pretrained_v2/ -o G40k.pth
@@ -44,4 +43,4 @@ RUN aria2c --console-log-level=error -c -x 16 -s 16 -k 1M https://huggingface.co
 
 VOLUME [ "/app/weights", "/app/opt" ]
 
-CMD ["python3", "infer-web.py"]
+CMD ["python3", "web.py"]

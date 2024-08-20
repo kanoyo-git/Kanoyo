@@ -1,8 +1,10 @@
 import os
 import sys
 import logging
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
+logging.getLogger("numba").setLevel(logging.WARNING)
 
 now_dir = os.getcwd()
 sys.path.append(os.path.join(now_dir))
@@ -22,8 +24,7 @@ try:
     import intel_extension_for_pytorch as ipex  # pylint: disable=import-error, unused-import
 
     if torch.xpu.is_available():
-        from infer.modules.ipex import ipex_init
-        from infer.modules.ipex.gradscaler import gradscaler_init
+        from rvc.ipex import ipex_init, gradscaler_init
         from torch.xpu.amp import autocast
 
         GradScaler = gradscaler_init()
@@ -45,7 +46,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from infer.lib.infer_pack import commons
 from infer.lib.train.data_utils import (
     DistributedBucketSampler,
     TextAudioCollate,
@@ -54,17 +54,17 @@ from infer.lib.train.data_utils import (
     TextAudioLoaderMultiNSFsid,
 )
 
+from rvc.layers.discriminators import MultiPeriodDiscriminator
+
 if hps.version == "v1":
-    from infer.lib.infer_pack.models import MultiPeriodDiscriminator
-    from infer.lib.infer_pack.models import SynthesizerTrnMs256NSFsid as RVC_Model_f0
-    from infer.lib.infer_pack.models import (
+    from rvc.layers.synthesizers import SynthesizerTrnMs256NSFsid as RVC_Model_f0
+    from rvc.layers.synthesizers import (
         SynthesizerTrnMs256NSFsid_nono as RVC_Model_nof0,
     )
 else:
-    from infer.lib.infer_pack.models import (
+    from rvc.layers.synthesizers import (
         SynthesizerTrnMs768NSFsid as RVC_Model_f0,
         SynthesizerTrnMs768NSFsid_nono as RVC_Model_nof0,
-        MultiPeriodDiscriminatorV2 as MultiPeriodDiscriminator,
     )
 
 from infer.lib.train.losses import (
@@ -74,7 +74,12 @@ from infer.lib.train.losses import (
     kl_loss,
 )
 from infer.lib.train.mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-from infer.lib.train.process_ckpt import savee
+from infer.lib.train.process_ckpt import save_small_model
+
+from rvc.layers.utils import (
+    slice_on_last_dim,
+    total_grad_norm,
+)
 
 global_step = 0
 
@@ -88,7 +93,7 @@ class EpochRecorder:
         elapsed_time = now_time - self.last_time
         self.last_time = now_time
         elapsed_time_str = str(datetime.timedelta(seconds=elapsed_time))
-        current_time = datetime.datetime.now().strftime("%H:%M:%S")     # %Y-%m-%d (год, месяц, день) - нумаю не нужны
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")
         return f"[{current_time}] | ({elapsed_time_str})"
 
 
@@ -117,7 +122,7 @@ def main():
         children[i].join()
 
 
-def run(rank, n_gpus, hps, logger: logging.Logger):
+def run(rank, n_gpus, hps: utils.HParams, logger: logging.Logger):
     global global_step
     if rank == 0:
         # logger = utils.get_logger(hps.model_dir)
@@ -162,24 +167,29 @@ def run(rank, n_gpus, hps, logger: logging.Logger):
         persistent_workers=True,
         prefetch_factor=8,
     )
+    mdl = hps.copy().model
+    del mdl.use_spectral_norm
     if hps.if_f0 == 1:
         net_g = RVC_Model_f0(
             hps.data.filter_length // 2 + 1,
             hps.train.segment_size // hps.data.hop_length,
-            **hps.model,
-            is_half=hps.train.fp16_run,
+            **mdl,
             sr=hps.sample_rate,
         )
     else:
         net_g = RVC_Model_nof0(
             hps.data.filter_length // 2 + 1,
             hps.train.segment_size // hps.data.hop_length,
-            **hps.model,
-            is_half=hps.train.fp16_run,
+            **mdl,
         )
     if torch.cuda.is_available():
         net_g = net_g.cuda(rank)
-    net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm)
+    has_xpu = bool(hasattr(torch, "xpu") and torch.xpu.is_available())
+    net_d = MultiPeriodDiscriminator(
+        hps.version,
+        use_spectral_norm=hps.model.use_spectral_norm,
+        has_xpu=has_xpu,
+    )
     if torch.cuda.is_available():
         net_d = net_d.cuda(rank)
     optim_g = torch.optim.AdamW(
@@ -297,7 +307,17 @@ def run(rank, n_gpus, hps, logger: logging.Logger):
 
 
 def train_and_evaluate(
-    rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers, cache
+    rank,
+    epoch,
+    hps,
+    nets: Tuple[RVC_Model_f0, MultiPeriodDiscriminator],
+    optims,
+    schedulers,
+    scaler,
+    loaders,
+    logger,
+    writers,
+    cache,
 ):
     net_g, net_d = nets
     optim_g, optim_d = optims
@@ -398,6 +418,7 @@ def train_and_evaluate(
     for batch_idx, info in data_iterator:
         # Data
         ## Unpack
+        pitch = pitchf = None
         if hps.if_f0 == 1:
             (
                 phone,
@@ -427,22 +448,13 @@ def train_and_evaluate(
 
         # Calculate
         with autocast(enabled=hps.train.fp16_run):
-            if hps.if_f0 == 1:
-                (
-                    y_hat,
-                    ids_slice,
-                    x_mask,
-                    z_mask,
-                    (z, z_p, m_p, logs_p, m_q, logs_q),
-                ) = net_g(phone, phone_lengths, pitch, pitchf, spec, spec_lengths, sid)
-            else:
-                (
-                    y_hat,
-                    ids_slice,
-                    x_mask,
-                    z_mask,
-                    (z, z_p, m_p, logs_p, m_q, logs_q),
-                ) = net_g(phone, phone_lengths, spec, spec_lengths, sid)
+            (
+                y_hat,
+                ids_slice,
+                x_mask,
+                z_mask,
+                (z, z_p, m_p, logs_p, m_q, logs_q),
+            ) = net_g(phone, phone_lengths, spec, spec_lengths, sid, pitch, pitchf)
             mel = spec_to_mel_torch(
                 spec,
                 hps.data.filter_length,
@@ -451,7 +463,7 @@ def train_and_evaluate(
                 hps.data.mel_fmin,
                 hps.data.mel_fmax,
             )
-            y_mel = commons.slice_segments(
+            y_mel = slice_on_last_dim(
                 mel, ids_slice, hps.train.segment_size // hps.data.hop_length
             )
             with autocast(enabled=False):
@@ -467,7 +479,7 @@ def train_and_evaluate(
                 )
             if hps.train.fp16_run == True:
                 y_hat_mel = y_hat_mel.half()
-            wave = commons.slice_segments(
+            wave = slice_on_last_dim(
                 wave, ids_slice * hps.data.hop_length, hps.train.segment_size
             )  # slice
 
@@ -480,7 +492,7 @@ def train_and_evaluate(
         optim_d.zero_grad()
         scaler.scale(loss_disc).backward()
         scaler.unscale_(optim_d)
-        grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
+        grad_norm_d = total_grad_norm(net_d.parameters())
         scaler.step(optim_d)
 
         with autocast(enabled=hps.train.fp16_run):
@@ -495,18 +507,18 @@ def train_and_evaluate(
         optim_g.zero_grad()
         scaler.scale(loss_gen_all).backward()
         scaler.unscale_(optim_g)
-        grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
+        grad_norm_g = total_grad_norm(net_g.parameters())
         scaler.step(optim_g)
         scaler.update()
 
         if rank == 0:
             if global_step % hps.train.log_interval == 0:
                 lr = optim_g.param_groups[0]["lr"]
-                #logger.info(
-                #    "Train Epoch: {} [{:.0f}%]".format(
-                #        epoch, 100.0 * batch_idx / len(train_loader)       Проценты на каждой эпохе думаю не нужны
-                #    )
-                #)
+                # logger.info(
+                #     "Train Epoch: {} [{:.0f}%]".format(
+                #         epoch, 100.0 * batch_idx / len(train_loader)
+                #     )
+                # )
                 # Amor For Tensorboard display
                 if loss_mel > 75:
                     loss_mel = 75
@@ -515,7 +527,7 @@ def train_and_evaluate(
 
                 logger.info([global_step, lr])
                 logger.info(
-                    f"loss_disc={loss_disc:.3f}, loss_gen={loss_gen:.3f}, loss_fm={loss_fm:.3f}, loss_mel={loss_mel:.3f}, loss_kl={loss_kl:.3f}"
+                    f"loss_disc={loss_disc:.3f}, loss_gen={loss_gen:.3f}, loss_fm={loss_fm:.3f},loss_mel={loss_mel:.3f}, loss_kl={loss_kl:.3f}"
                 )
                 scalar_dict = {
                     "loss/g/total": loss_gen_all,
@@ -541,21 +553,21 @@ def train_and_evaluate(
                 scalar_dict.update(
                     {"loss/d_g/{}".format(i): v for i, v in enumerate(losses_disc_g)}
                 )
-                #image_dict = {
-                #    "slice/mel_org": utils.plot_spectrogram_to_numpy(
-                #        y_mel[0].data.cpu().numpy()
-                #    ),
-                #    "slice/mel_gen": utils.plot_spectrogram_to_numpy(      Думаю ты спектрограммы не смотришь
-                #        y_hat_mel[0].data.cpu().numpy()
-                #    ),
-                #    "all/mel": utils.plot_spectrogram_to_numpy(
-                #        mel[0].data.cpu().numpy()
-                #    ),
-                #}
+                # image_dict = {
+                #     "slice/mel_org": utils.plot_spectrogram_to_numpy(
+                #         y_mel[0].data.cpu().numpy()
+                #     ),
+                #     "slice/mel_gen": utils.plot_spectrogram_to_numpy(
+                #         y_hat_mel[0].data.cpu().numpy()
+                #     ),
+                #     "all/mel": utils.plot_spectrogram_to_numpy(
+                #         mel[0].data.cpu().numpy()
+                #     ),
+                # }
                 utils.summarize(
                     writer=writer,
                     global_step=global_step,
-                    #images=image_dict,     Это к вернему тож относится
+                    #images=image_dict,
                     scalars=scalar_dict,
                 )
         global_step += 1
@@ -602,7 +614,7 @@ def train_and_evaluate(
                 % (
                     hps.name,
                     epoch,
-                    savee(
+                    save_small_model(
                         ckpt,
                         hps.sample_rate,
                         hps.if_f0,
@@ -626,7 +638,7 @@ def train_and_evaluate(
         logger.info(
             "saving final ckpt:%s"
             % (
-                savee(
+                save_small_model(
                     ckpt, hps.sample_rate, hps.if_f0, hps.name, epoch, hps.version, hps
                 )
             )
@@ -636,5 +648,5 @@ def train_and_evaluate(
 
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method("spawn")
+    mp.set_start_method("spawn", force=True)
     main()

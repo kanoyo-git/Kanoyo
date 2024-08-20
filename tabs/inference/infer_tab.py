@@ -90,7 +90,7 @@ def infer_tab():
                 f0method0 = gr.Radio(
                     label=i18n("Метод извлечения F0"),
                     choices=(
-                        ["harvest", "crepe", "rmvpe"]
+                        ["harvest", "crepe", "rmvpe", "fcpe"]
                         if config.dml == False
                         else ["harvest", "rmvpe"]
                     ),

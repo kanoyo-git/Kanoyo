@@ -1,6 +1,7 @@
 import json
 import locale
 import os
+from configs import singleton_variable
 
 
 def load_language_list(language):
@@ -9,12 +10,13 @@ def load_language_list(language):
     return language_list
 
 
+@singleton_variable
 class I18nAuto:
     def __init__(self, language=None):
         if language in ["Auto", None]:
-            language = locale.getdefaultlocale()[
-                0
-            ] 
+            language = locale.getdefaultlocale(
+                envvars=("LANG", "LC_ALL", "LC_CTYPE", "LANGUAGE")
+            )[0]
         if not os.path.exists(f"./i18n/locale/{language}.json"):
             language = "en_US"
         self.language = language
@@ -24,4 +26,4 @@ class I18nAuto:
         return self.language_map.get(key, key)
 
     def __repr__(self):
-        return "Use Language: " + self.language
+        return "Language: " + self.language
