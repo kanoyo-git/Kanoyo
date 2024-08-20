@@ -7,7 +7,6 @@ import warnings
 import torch
 import platform
 from infer.modules.vc import VC, show_info, hash_similarity
-from infer.modules.uvr5.modules import uvr
 from infer.lib.train.process_ckpt import change_info, extract_small_model, merge
 from i18n.i18n import I18nAuto
 from configs import Config
@@ -79,7 +78,6 @@ if_gpu_ok = False
 
 # Загрузка переменных окружения
 weight_root = os.getenv("weight_root")
-weight_uvr5_root = os.getenv("weight_uvr5_root")
 index_root = os.getenv("index_root")
 outside_index_root = os.getenv("outside_index_root")
 

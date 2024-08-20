@@ -73,7 +73,6 @@ if_gpu_ok = False
 
 # Получение путей к активам из переменных окружения
 weight_root = os.getenv("weight_root")
-weight_uvr5_root = os.getenv("weight_uvr5_root")
 index_root = os.getenv("index_root")
 outside_index_root = os.getenv("outside_index_root")
 
