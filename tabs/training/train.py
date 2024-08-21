@@ -85,6 +85,14 @@ outside_index_root = os.getenv("outside_index_root")
 names = [name for name in os.listdir(weight_root) if name.endswith(".pth")]
 index_paths = []
 
+def transfer_files(filething, dataset_dir='dataset/'):
+    file_names = [f.name for f in filething]
+    for f in file_names:
+        filename = os.path.basename(f)
+        destination = os.path.join(dataset_dir, filename)
+        shutil.copyfile(f, destination)
+    return i18n("Transferred files to dataset directory!")
+
 # Функция для поиска индексов
 def lookup_indices(index_root):
     for root, dirs, files in os.walk(index_root, topdown=False):
@@ -128,6 +136,15 @@ def if_done(done, p):
     done[0] = True
 
 # Функция для ожидания завершения нескольких процессов
+
+def transfer_files(filething, dataset_dir='dataset/'):
+    file_names = [f.name for f in filething]
+    for f in file_names:
+        filename = os.path.basename(f)
+        destination = os.path.join(dataset_dir, filename)
+        shutil.copyfile(f, destination)
+    return i18n("Transferred files to dataset directory!")
+
 def if_done_multi(done, ps):
     while any(p.poll() is None for p in ps):
         sleep(0.5)
