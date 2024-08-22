@@ -30,7 +30,7 @@ def train_tab():
         gr.Markdown(value=i18n(""))
         with gr.Row():
             trainset_dir4 = gr.Textbox(
-                label=i18n("Путь к датасету"), value="dataset"
+                label=i18n("Путь к датасету"), value="assets/dataset/"
             )
             with gr.Accordion(i18n('Загрузить датасет (альтернатива)'), open=False, visible=True):
                 file_thin = gr.Files(label=i18n('Аудио файлы в формате wav, mp3, flac или ogg')) 

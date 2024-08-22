@@ -85,7 +85,7 @@ outside_index_root = os.getenv("outside_index_root")
 names = [name for name in os.listdir(weight_root) if name.endswith(".pth")]
 index_paths = []
 
-def transfer_files(filething, dataset_dir='dataset/'):
+def transfer_files(filething, dataset_dir='assets/dataset/'):
     file_names = [f.name for f in filething]
     for f in file_names:
         filename = os.path.basename(f)
