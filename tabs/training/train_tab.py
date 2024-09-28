@@ -100,7 +100,7 @@ def train_tab():
                         visible=F0GPUVisible,
                     )
                 gpu_info9 = gr.Textbox(
-                        label=i18n("GPU Model"),
+                        label=i18n("Модель GPU"),
                         value=gpu_info,
                         visible=F0GPUVisible,
                     )
@@ -108,6 +108,7 @@ def train_tab():
                 label=i18n("ID ГПУ (Оставьте 0 если используете 1 GPU, используйте 0-1 для нескольких"),
                 value=gpus if gpus != "" else "0",
                 interactive=True,
+                visible=False,
                 )
                 with gr.Group():
                     if_save_latest13 = gr.Radio(
