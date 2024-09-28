@@ -7,18 +7,18 @@ i18n = I18nAuto()
 config = Config()
 
 
-with gr.Blocks(title="RVC WebUI") as app:
-    gr.Markdown("## RVC WebUI")
+with gr.Blocks(title="Kanoyo") as app:
+    gr.Markdown("## Kanoyo")
     gr.Markdown(
         value=i18n(
-            "This software is open source under the MIT license. The author does not have any control over the software. Users who use the software and distribute the sounds exported by the software are solely responsible. <br>If you do not agree with this clause, you cannot use or reference any codes and files within the software package. See the root directory <b>Agreement-LICENSE.txt</b> for details."
+            "Преобразование голоса с открытым исходным кодом и огромным функционалом."
         )
     )
     with gr.Tabs():
-        with gr.Tab(i18n("Infer")):
+        with gr.Tab(i18n("Изменить голос")):
             infer_tab()
 
-        with gr.Tab(i18n("Train")):
+        with gr.Tab(i18n("Обучение")):
             train_tab()
 
     if config.global_link:
