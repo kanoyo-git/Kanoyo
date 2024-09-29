@@ -46,3 +46,4 @@ python-dotenv>=1.0.0
 av
 aria2
 pybase16384
+mega.py
