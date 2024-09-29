@@ -11,9 +11,6 @@ import sys
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 
-os.makedirs(os.path.join(now_dir, "models/index"), exist_ok=True)
-os.makedirs(os.path.join(now_dir, "models/pth"), exist_ok=True)
-
 from i18n.i18n import I18nAuto
 i18n = I18nAuto()
 
