@@ -16,9 +16,9 @@ i18n = I18nAuto()
 
 def download_from_url(url, model):
     if url == '':
-        return "URL cannot be left empty."
+        return "Ссылка не может быть пустой."
     if model == '':
-        return "You need to name your model. For example: Ilaria"
+        return "Вы не написали имя модели. Пример: Kanoyo"
 
     url = url.strip()
     zip_dirs = ["zips", "unzips"]
@@ -67,14 +67,14 @@ def download_from_url(url, model):
 
         shutil.rmtree("zips")
         shutil.rmtree("unzips")
-        return i18n("Model downloaded, you can go back to the inference page!")
+        return i18n("Модель загружена, вы можете вернуться на вкладку для изменения голоса!")
 
     except subprocess.CalledProcessError as e:
-        return f"ERROR - Download failed (gdown): {str(e)}"
+        return f"ERROR - Ошибка загрузки (gdown): {str(e)}"
     except requests.exceptions.RequestException as e:
-        return f"ERROR - Download failed (requests): {str(e)}"
+        return f"ERROR - Ошибка загрузки (requests): {str(e)}"
     except Exception as e:
-        return f"ERROR - The test failed: {str(e)}"
+        return f"ERROR - Тест провален: {str(e)}"
     
 def import_files(file):
     if file is not None:
@@ -92,34 +92,34 @@ def import_files(file):
                             if not os.path.exists(destination):
                                 shutil.move(os.path.join(root, file), destination)
                             else:
-                                print(f"File {destination} already exists. Skipping.")
+                                print(f"Файл {destination} уже существует. Пропускаю.")
                         elif file.endswith('.index'):
                             destination = './models/index/' + file
                             if not os.path.exists(destination):
                                 shutil.move(os.path.join(root, file), destination)
                             else:
-                                print(f"File {destination} already exists. Skipping.")
+                                print(f"Файл {destination} уже существует. Пропускаю.")
                 # Remove the temporary directory
                 shutil.rmtree(temp_dir)
-            return "Zip file has been successfully extracted."
+            return "Зип-файл успешно распакован."
         elif file_name.endswith('.pth'):
             destination = './models/pth/' + os.path.basename(file.name)
             if not os.path.exists(destination):
                 os.rename(file.name, destination)
             else:
-                print(f"File {destination} already exists. Skipping.")
-            return "PTH file has been successfully imported."
+                print(f"Файл {destination} уже существует. Пропускаю.")
+            return "PTH файл успешно импортирован."
         elif file_name.endswith('.index'):
             destination = './models/index/' + os.path.basename(file.name)
             if not os.path.exists(destination):
                 os.rename(file.name, destination)
             else:
-                print(f"File {destination} already exists. Skipping.")
-            return "Index file has been successfully imported."
+                print(f"Файл {destination} уже существует. Пропускаю.")
+            return "Файл индекса успешно импортирован."
         else:
-            return "Unsupported file type."
+            return "Неподдерживаемый тип файла."
     else:
-        return "No file has been uploaded."
+        return "Файл не был загружен."
     
 def import_button_click(file):
     return import_files(file)
