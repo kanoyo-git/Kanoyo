@@ -148,6 +148,9 @@ class VC:
             if file_index:
                 if hasattr(file_index, "name"):
                     file_index = str(file_index.name)
+                elif not isinstance(file_index, str):
+                    file_index = str(file_index)
+                
                 file_index = (
                     file_index.strip(" ")
                     .strip('"')
