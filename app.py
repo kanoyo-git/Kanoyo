@@ -1,6 +1,7 @@
 import gradio as gr
 from tabs.inference.infer_tab import infer_tab
 from tabs.training.train_tab import train_tab
+from tabs.models.models_tab import models_tab
 from i18n.i18n import I18nAuto
 from configs import Config
 i18n = I18nAuto()
@@ -20,6 +21,9 @@ with gr.Blocks(title="Kanoyo") as app:
 
         with gr.Tab(i18n("Обучение")):
             train_tab()
+
+        with gr.Tab(i18n("Скачать модель")):
+            models_tab()
 
     if config.global_link:
         app.queue(max_size=1022).launch(share=True, max_threads=511)
